@@ -17,6 +17,8 @@ import android.util.Log;
 import android.view.View;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.widget.CompoundButton;
+import android.widget.Switch;
 import android.widget.TextClock;
 import android.widget.TextView;
 
@@ -33,8 +35,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-
-public class MainActivity extends AppCompatActivity implements SensorEventListener {
+//Implement differential of the Magnitude to detect a stop and start
+//At the beginning user can press calibrate, to calibrate sensor with true north values
+//Could use previously developed compass to check if true north is actually true
+public class MainActivity extends AppCompatActivity implements SensorEventListener, CompoundButton.OnCheckedChangeListener {
 
     private final Handler mHandler = new Handler();
     private Runnable mTimer;
@@ -54,23 +58,40 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 //    private final int MAX_GRAPH = 128;
     private double graph2LastXValue = 5d;
 
-    private SensorManager mSensorManager;
-    private Sensor mSensor;
+    private SensorManager mSensorManager;   //sensorManager object
+    private Sensor mSensor; //magnetometer sensor
+    private Sensor sSensor; //step counter sensor
+    private Sensor gSensor; //gyroscope sensor
     private float[] gravity;
     private float[] linear_acceleration;
     private float allLinearAcc = 0;
-    private float allGravity = 0;
+    private float allGravity = 0;   //combined gravity
 
     private TextView maxFreqText;
     private TextView maxMagnitudeText;
     private TextView distanceText;
     private TextView dynamicRangeText;
     private TextView statusText;
+    private TextView stepCounterText;
+    private TextView mapXText;
+    private TextView mapYText;
+    private TextView degreesText;
 
     private float walkedDistance = 0.0f;
 
     private long prevTime = System.currentTimeMillis();
-    private boolean stillMoving = false;
+    private float stepCount = 0;
+
+    private float mapX = 0.0f;
+    private float mapY = 0.0f;
+    private float degrees = 0.0f;
+
+    private float[] rawRotationValues = new float[4];
+    private Sensor rSensor;
+    private final static double PI = Math.PI;
+    private final static double TWO_PI = PI*2;
+
+    private boolean positionIndoor = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -93,10 +114,20 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         distanceText = (TextView) findViewById(R.id.distanceText);
         dynamicRangeText = (TextView) findViewById(R.id.dynamicRangeText);
         statusText = (TextView) findViewById(R.id.statusText);
+        stepCounterText = (TextView) findViewById(R.id.stepCounterText);
+        mapXText = (TextView) findViewById(R.id.map_x_text);
+        mapYText = (TextView) findViewById(R.id.map_y_text);
+        degreesText = (TextView) findViewById(R.id.degreesText);
+
+        Switch indoorOutdoorSwitch = (Switch) findViewById(R.id.indoorOutdoorSwitch);
+        indoorOutdoorSwitch.setOnCheckedChangeListener(this);
     }
     private void initialiseSensors (){
         mSensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         mSensor = mSensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+        sSensor = mSensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
+        rSensor = mSensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR);
+//        gSensor = mSensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR);
         gravity = new float[3];
         linear_acceleration = new float[3];
     }
@@ -148,7 +179,9 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
     protected void onResume() {
         super.onResume();
+        mSensorManager.registerListener(this, rSensor, SensorManager.SENSOR_DELAY_GAME);
         mSensorManager.registerListener(this, mSensor, SensorManager.SENSOR_DELAY_GAME);
+        mSensorManager.registerListener(this, sSensor, SensorManager.SENSOR_DELAY_GAME);
         mTimer = new Runnable() {
             @Override
             public void run() {
@@ -273,20 +306,29 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                 if (maxMag > 5.0 && (dynamicRange > 0.18 || (makeTransition && dynamicRange > 0.14)) && mag[0]/maxMag < 0.5 ){
                     //checks for random single motions
                     if (System.currentTimeMillis() - prevTime > 400) {
-                        walkedDistance += maxFreq / SAMPLING_FREQ / 2.0 + maxMag / (100.0 * SAMPLING_FREQ);
+                        double changeInDistance = maxFreq / SAMPLING_FREQ / 2.0 + maxMag / (100.0 * SAMPLING_FREQ);
+                        walkedDistance += changeInDistance;
+
+                        mapX += Math.cos(degrees) * changeInDistance;
+                        mapY += Math.sin(degrees) * changeInDistance;
+
                         if (maxFreq < 1.6)
                             statusText.setText("WALKING");
                         else
                             statusText.setText("RUNNING");
                     }
-
                 } else {
                     prevTime = System.currentTimeMillis();
-                    statusText.setText("STANDING");
+                    if (mag[0]/maxMag > 0.5 &&  mag[0] > 5.0)
+                        statusText.setText("ROTATING");
+                    else
+                        statusText.setText("STANDING");
                 }
 
+                distanceText.setText(String.format("Walked= %.2f m", walkedDistance));
+                mapXText.setText(String.format("X= %.2f", mapX));
+                mapYText.setText(String.format("Y= %.2f", mapY));
 
-                distanceText.setText(String.format("Walked Distance= %.2f m", walkedDistance));
 //                System.out.println("MaxFreq=" + (float)maxFreq + " maxMag=" + (float)maxMag + " Index=" + maxIndex);
 //                for (int i = 0; i < FFT_SIZE - 1; i++){
 //                    FFTdata[i] = new DataPoint((double) i, mag[i]);
@@ -295,11 +337,51 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 //                System.out.println();
 
                 break;
+            case Sensor.TYPE_STEP_COUNTER:
+                stepCount = event.values[0];
+                stepCounterText.setText("Steps=" + stepCount);
+                break;
+            case Sensor.TYPE_GAME_ROTATION_VECTOR:
+                rawRotationValues = event.values.clone();
+                break;
+            case Sensor.TYPE_ROTATION_VECTOR:
+
+                break;
         }
+        if (positionIndoor)
+            calculateGyroOrientation();
+        else
+            calculateRotationOrientation();
     }
 
     @Override
     public void onAccuracyChanged(Sensor sensor, int accuracy) {
 
+    }
+
+    private void calculateRotationOrientation (){
+        float[] rotationMatrix = new float[16];
+        float[] orientation = new float[3];
+        SensorManager.getRotationMatrixFromVector(rotationMatrix, rawRotationValues);
+        SensorManager.getOrientation(rotationMatrix, orientation);
+
+        degrees = ((float) mod(orientation[0] + TWO_PI,TWO_PI) );
+        degreesText.setText(String.format("deg= %.2f˚", degrees * 180.0f/PI));
+    }
+
+    private void calculateGyroOrientation (){
+
+    }
+
+    private double mod(double a, double b){
+        return a % b;
+    }
+
+    @Override
+    public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+        positionIndoor = isChecked;
+        walkedDistance = 0.0f;
+        mapX = 0.0f;
+        mapY = 0.0f;
     }
 }
