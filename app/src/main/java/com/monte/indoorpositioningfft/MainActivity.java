@@ -43,7 +43,7 @@ import java.util.TreeMap;
 //Implement differential of the Magnitude to detect a stop and start
 //At the beginning user can press calibrate, to calibrate sensor with true north values
 //Could use previously developed compass to check if true north is actually true
-public class MainActivity extends AppCompatActivity implements SensorEventListener, CompoundButton.OnCheckedChangeListener, View.OnClickListener {
+public class MainActivity extends AppCompatActivity implements SensorEventListener, View.OnClickListener {
 
     private final Handler mHandler = new Handler();
     private Runnable mTimer;
@@ -65,11 +65,8 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
     private SensorManager mSensorManager;   //sensorManager object
     private Sensor aSensor; //accelerometer sensor
-    private Sensor mSensor; //magnetometer sensor
     private Sensor sSensor; //step counter sensor
-    private Sensor bSensor; //gyroscope sensor
-
-    private float barometerRaw = 0.0f;
+    private Sensor rSensor; //rotation vector sensor
 
     private float[] gravity;
     private float[] linear_acceleration;
@@ -96,16 +93,9 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private float degrees = 0.0f;
 
     private float[] rawRotationValues = new float[4];
-    private Sensor rSensor;
+
     private final static double PI = Math.PI;
     private final static double TWO_PI = PI*2;
-
-    private boolean positionIndoor = false;
-
-    private Button locateButton;
-    private Button storeButton;
-
-    NavigableMap<Float, String> mapValues = new TreeMap<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -132,22 +122,12 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         mapXText = (TextView) findViewById(R.id.map_x_text);
         mapYText = (TextView) findViewById(R.id.map_y_text);
         degreesText = (TextView) findViewById(R.id.degreesText);
-
-//        Switch indoorOutdoorSwitch = (Switch) findViewById(R.id.indoorOutdoorSwitch);
-//        indoorOutdoorSwitch.setOnCheckedChangeListener(this);
-
-        locateButton = (Button) findViewById(R.id.locatePositionButton);
-        storeButton = (Button) findViewById(R.id.storePositionButton);
-        locateButton.setOnClickListener(this);
-        storeButton.setOnClickListener(this);
     }
     private void initialiseSensors (){
         mSensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         aSensor = mSensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         sSensor = mSensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
         rSensor = mSensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR);
-        mSensor = mSensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
-        bSensor = mSensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE);
 //        gSensor = mSensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
         gravity = new float[3];
         linear_acceleration = new float[3];
@@ -195,7 +175,6 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             FFTdataList.add(0.0f);
         }
         sensorFFT = new FFT(FFT_SIZE);
-//        sensorFFT.fft(ReFFT, ImFFT);
         FFTwindow = sensorFFT.getWindow();
     }
 
@@ -204,8 +183,6 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         mSensorManager.registerListener(this, rSensor, SensorManager.SENSOR_DELAY_GAME);
         mSensorManager.registerListener(this, aSensor, SensorManager.SENSOR_DELAY_GAME);
         mSensorManager.registerListener(this, sSensor, SensorManager.SENSOR_DELAY_GAME);
-        mSensorManager.registerListener(this, mSensor, SensorManager.SENSOR_DELAY_GAME);
-        mSensorManager.registerListener(this, bSensor, SensorManager.SENSOR_DELAY_GAME);
         mTimer = new Runnable() {
             @Override
             public void run() {
@@ -217,12 +194,10 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                     mSeries.resetData(tmp);
                     graph2LastXValue = FFT_SIZE;
                 }
-                mSeries.appendData(new DataPoint(graph2LastXValue, averageBarometer), true, FFT_SIZE);
+                mSeries.appendData(new DataPoint(graph2LastXValue, allGravity), true, FFT_SIZE);
                 mHandler.postDelayed(this, 30);
             }
         };
-
-
         mHandler.postDelayed(mTimer, 1000);
 
         FFTtimer = new Runnable() {
@@ -250,9 +225,6 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
-        // Handle action bar item clicks here. The action bar will
-        // automatically handle clicks on the Home/Up button, so long
-        // as you specify a parent activity in AndroidManifest.xml.
         int id = item.getItemId();
 
         //noinspection SimplifiableIfStatement
@@ -263,14 +235,8 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         return super.onOptionsItemSelected(item);
     }
 
-    int delay = 0;
-    float averagedMagnetic = 0;
-    float allMagnetic = 0;
-    float allBarometer = 0.0f;
-    float averageBarometer = 0.0f;
     @Override
     public void onSensorChanged(SensorEvent event) {
-        final float alpha = 0.8f;
         switch (event.sensor.getType()){
             case Sensor.TYPE_ACCELEROMETER:
                 accelerometerAnalysis(event.values.clone());
@@ -283,33 +249,8 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                 rawRotationValues = event.values.clone();
                 break;
             case Sensor.TYPE_ROTATION_VECTOR:
-
-                break;
-            case Sensor.TYPE_MAGNETIC_FIELD:
-                float[] magnet = new float[3];
-                magnet[0] = alpha * magnet[0] + (1 - alpha) * event.values[0];
-                magnet[1] = alpha * magnet[1] + (1 - alpha) * event.values[1];
-                magnet[2] = alpha * magnet[2] + (1 - alpha) * event.values[2];
-                averagedMagnetic += (float) Math.sqrt(magnet[0]*magnet[0] + magnet[1]*magnet[1] + magnet[2]*magnet[2]);
-//                if (++delay == 10){
-//                    allMagnetic = averagedMagnetic/10.0f;
-//                    averagedMagnetic = 0.0f;
-//                    delay = 0;
-//                }
-                break;
-            case Sensor.TYPE_PRESSURE:
-                barometerRaw = alpha * barometerRaw + (1 - alpha) * event.values[0];
-                allBarometer += barometerRaw;
-                if (++delay == 10){
-                    averageBarometer = allBarometer/10.0f;
-                    allBarometer = 0.0f;
-                    delay = 0;
-                }
                 break;
         }
-        if (positionIndoor)
-            calculateGyroOrientation();
-        else
             calculateRotationOrientation();
     }
 
@@ -325,10 +266,6 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
         degrees = ((float) mod(orientation[0] + TWO_PI,TWO_PI) );
         degreesText.setText(String.format("deg= %.2f˚", degrees * 180.0f/PI));
-    }
-
-    private void calculateGyroOrientation (){
-
     }
 
     private void accelerometerAnalysis(float []values) {
@@ -454,42 +391,9 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     }
 
     @Override
-    public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
-        positionIndoor = isChecked;
+    public void onClick(View v) {
         walkedDistance = 0.0f;
         mapX = 0.0f;
         mapY = 0.0f;
-    }
-    int value = 0;
-    String allStored = new String();
-    @Override
-    public void onClick(View v) {
-        switch (v.getId()){
-            case R.id.storePositionButton:
-
-                allStored +=  "Key=" + allMagnetic + "Value=" + value + "\n";
-                Toast.makeText(this, "Key=" + allMagnetic + "Value=" + value, Toast.LENGTH_SHORT ).show();
-
-                mapValues.put(allMagnetic, value+"");
-                value++;
-                break;
-            case R.id.locatePositionButton:
-
-                float above = mapValues.ceilingKey(allMagnetic);
-                float below = mapValues.floorKey(allMagnetic);
-
-                String tmp = "Found: " + allMagnetic +" which is value="+ mapValues.get(allMagnetic - below > above - allMagnetic ? above : below) + "\n";
-                tmp += allStored;
-
-//                for (int i = 0; i < mapValues.size(); i++){
-//                    tmp += "Key=" + mapValues. + " Value=" + i + "\n";
-//                }
-
-                Toast.makeText(this, tmp, Toast.LENGTH_SHORT ).show();
-//                System.out.println("Reaching this...");
-                break;
-        }
-
-
     }
 }
