@@ -112,13 +112,29 @@
             android:layout_height="wrap_content"
             android:gravity="center"
             android:layout_weight="1"/>
-        <Switch
-            android:id="@+id/indoorOutdoorSwitch"
+
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:gravity="center"
-            android:text="Indoor?"
+            android:orientation="horizontal"
+            android:layout_weight="1"
+            android:weightSum="2">
+
+            <Button
+            android:id="@+id/locatePositionButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+                android:gravity="center"
+            android:text="Locate"
             android:layout_weight="1"/>
+            <Button
+                android:id="@+id/storePositionButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="Store"
+                android:layout_weight="1"/>
+        </LinearLayout>
     </LinearLayout>
 
 </LinearLayout>
