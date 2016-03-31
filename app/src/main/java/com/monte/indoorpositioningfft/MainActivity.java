@@ -8,21 +8,13 @@ import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Bundle;
 import android.os.Handler;
-import android.provider.ContactsContract;
-import android.support.design.widget.FloatingActionButton;
-import android.support.design.widget.Snackbar;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
 import android.util.Log;
 import android.view.View;
 import android.view.Menu;
 import android.view.MenuItem;
-import android.widget.Button;
-import android.widget.CompoundButton;
-import android.widget.Switch;
-import android.widget.TextClock;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import com.jjoe64.graphview.GraphView;
 import com.jjoe64.graphview.GridLabelRenderer;
@@ -30,23 +22,16 @@ import com.jjoe64.graphview.series.BarGraphSeries;
 import com.jjoe64.graphview.series.DataPoint;
 import com.jjoe64.graphview.series.LineGraphSeries;
 
-import org.w3c.dom.Text;
-
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.NavigableMap;
-import java.util.Random;
-import java.util.TreeMap;
 
 //Implement differential of the Magnitude to detect a stop and start
 //At the beginning user can press calibrate, to calibrate sensor with true north values
 //Could use previously developed compass to check if true north is actually true
 public class MainActivity extends AppCompatActivity implements SensorEventListener, View.OnClickListener {
 
-    private final Handler mHandler = new Handler();
-    private Runnable mTimer;
+    private final Handler mHandler = new Handler(); //for handling thread
+    private Runnable rawValuesTimer;
     private Runnable FFTtimer;
     private LineGraphSeries<DataPoint> mSeries;
     private BarGraphSeries<DataPoint> FFTseries;
@@ -113,15 +98,15 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     }
 
     private void initialiseAdditionalInfo (){
-        maxFreqText = (TextView) findViewById(R.id.freqText);
-        maxMagnitudeText = (TextView) findViewById(R.id.magnitudeText);
-        distanceText = (TextView) findViewById(R.id.distanceText);
-        dynamicRangeText = (TextView) findViewById(R.id.dynamicRangeText);
-        statusText = (TextView) findViewById(R.id.statusText);
-        stepCounterText = (TextView) findViewById(R.id.stepCounterText);
-        mapXText = (TextView) findViewById(R.id.map_x_text);
-        mapYText = (TextView) findViewById(R.id.map_y_text);
-        degreesText = (TextView) findViewById(R.id.degreesText);
+        maxFreqText         = (TextView) findViewById(R.id.freqText);
+        maxMagnitudeText    = (TextView) findViewById(R.id.magnitudeText);
+        distanceText        = (TextView) findViewById(R.id.distanceText);
+        dynamicRangeText    = (TextView) findViewById(R.id.dynamicRangeText);
+        statusText          = (TextView) findViewById(R.id.statusText);
+        stepCounterText     = (TextView) findViewById(R.id.stepCounterText);
+        mapXText            = (TextView) findViewById(R.id.map_x_text);
+        mapYText            = (TextView) findViewById(R.id.map_y_text);
+        degreesText         = (TextView) findViewById(R.id.degreesText);
     }
     private void initialiseSensors (){
         mSensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
@@ -183,7 +168,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         mSensorManager.registerListener(this, rSensor, SensorManager.SENSOR_DELAY_GAME);
         mSensorManager.registerListener(this, aSensor, SensorManager.SENSOR_DELAY_GAME);
         mSensorManager.registerListener(this, sSensor, SensorManager.SENSOR_DELAY_GAME);
-        mTimer = new Runnable() {
+        rawValuesTimer = new Runnable() {
             @Override
             public void run() {
                 graph2LastXValue += 1d;
@@ -198,7 +183,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                 mHandler.postDelayed(this, 30);
             }
         };
-        mHandler.postDelayed(mTimer, 1000);
+        mHandler.postDelayed(rawValuesTimer, 1000);
 
         FFTtimer = new Runnable() {
             @Override
@@ -213,7 +198,8 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     protected void onPause() {
         super.onPause();
         mSensorManager.unregisterListener(this);
-        mHandler.removeCallbacks(mTimer);
+        mHandler.removeCallbacks(rawValuesTimer);
+        mHandler.removeCallbacks(FFTtimer);
     }
 
     @Override
@@ -235,11 +221,31 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         return super.onOptionsItemSelected(item);
     }
 
+
+    int delay = 0;
+    float gravitySum = 0;
     @Override
     public void onSensorChanged(SensorEvent event) {
         switch (event.sensor.getType()){
             case Sensor.TYPE_ACCELEROMETER:
-                accelerometerAnalysis(event.values.clone());
+                float alpha = 0.8f;
+                gravity[0] = alpha * gravity[0] + (1 - alpha) * event.values[0];
+                gravity[1] = alpha * gravity[1] + (1 - alpha) * event.values[1];
+                gravity[2] = alpha * gravity[2] + (1 - alpha) * event.values[2];
+                gravitySum += (float) Math.sqrt(gravity[0]*gravity[0] + gravity[1]*gravity[1] + gravity[2]*gravity[2])- 9.81f;
+                linear_acceleration[0] = event.values[0] - gravity[0];
+                linear_acceleration[1] = event.values[1] - gravity[1];
+                linear_acceleration[2] = event.values[2] - gravity[2];
+
+                if (delay++ == 4){
+                    delay = 0;
+                    allGravity = gravitySum/4;
+                    gravitySum = 0;
+                }
+
+                allLinearAcc = (float) Math.sqrt(linear_acceleration[0]*linear_acceleration[0] + linear_acceleration[1]*linear_acceleration[1] + linear_acceleration[2]*linear_acceleration[2]) / 9.7f - 1.0f;
+//                accelerometerAnalysis();
+                accelerometerAnalysisAnother();
                 break;
             case Sensor.TYPE_STEP_COUNTER:
                 stepCount = event.values[0];
@@ -268,17 +274,40 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         degreesText.setText(String.format("deg= %.2f˚", degrees * 180.0f/PI));
     }
 
-    private void accelerometerAnalysis(float []values) {
-        float alpha = 0.8f;
-        gravity[0] = alpha * gravity[0] + (1 - alpha) * values[0];
-        gravity[1] = alpha * gravity[1] + (1 - alpha) * values[1];
-        gravity[2] = alpha * gravity[2] + (1 - alpha) * values[2];
-        allGravity = (float) Math.sqrt(gravity[0]*gravity[0] + gravity[1]*gravity[1] + gravity[2]*gravity[2])- 9.75f;
-        linear_acceleration[0] = values[0] - gravity[0];
-        linear_acceleration[1] = values[1] - gravity[1];
-        linear_acceleration[2] = values[2] - gravity[2];
+    private boolean foundPoint = false;
+    private boolean isRising = false;
+    private float prevAllGravity = 0.0f;
+    private double previousSystemTime = 0.0f;
+    private int stepNumber = 0;
 
-        allLinearAcc = (float) Math.sqrt(linear_acceleration[0]*linear_acceleration[0] + linear_acceleration[1]*linear_acceleration[1] + linear_acceleration[2]*linear_acceleration[2]) / 9.7f - 1.0f;
+    private void accelerometerAnalysisAnother (){
+        float threshold = 0.4f;
+
+        if (prevAllGravity < allGravity)
+            isRising = true;
+        else
+            isRising = false;
+//finds the first point
+        if ( (allGravity > threshold) && isRising && !foundPoint){
+            foundPoint = true;
+            previousSystemTime = System.currentTimeMillis();
+        }
+//find the second point
+        if ( (allGravity < -threshold) && !isRising && foundPoint){
+            foundPoint = false;
+            double dT = System.currentTimeMillis() - previousSystemTime;
+            double freq = 1000.0/dT;
+            Log.e("Freq=", "" + freq + " Hz");
+            //checks for noise
+            if (freq < 15.0)
+                stepNumber++;
+            Log.e("No of Steps=", "" + stepNumber);
+
+        }
+        prevAllGravity = allGravity;
+    }
+
+    private void accelerometerAnalysis() {
 
 //                if (++delay == 2) {    //average in time
 //                    delay = 0;
