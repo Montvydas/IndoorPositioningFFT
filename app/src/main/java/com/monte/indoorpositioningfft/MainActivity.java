@@ -283,6 +283,9 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private void accelerometerAnalysisAnother (){
         float threshold = 0.4f;
 
+//        if (System.currentTimeMillis() - previousSystemTime > 1000)
+//            walk.setText(" STANDING ");
+
         if (prevAllGravity < allGravity)
             isRising = true;
         else
@@ -301,7 +304,8 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             //checks for noise
             if (freq < 15.0)
                 stepNumber++;
-            Log.e("No of Steps=", "" + stepNumber);
+
+            distanceText.setText("Steps=" + stepNumber);
 
         }
         prevAllGravity = allGravity;
